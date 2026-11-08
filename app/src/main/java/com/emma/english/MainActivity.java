@@ -59,7 +59,8 @@ public class MainActivity extends Activity {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
                 fileCallback = callback;
                 Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                intent.setType("application/json");
+                String accepted=String.join(",",params.getAcceptTypes());
+                intent.setType(accepted.contains("srt")||accepted.contains("vtt")||accepted.contains("text")?"*/*":"application/json");
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
                 try { startActivityForResult(intent, 44); }
                 catch (Exception error) { fileCallback.onReceiveValue(null); fileCallback = null; }
@@ -120,8 +121,9 @@ public class MainActivity extends Activity {
                 pendingBackup = backup;
                 Intent saveIntent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
                 saveIntent.addCategory(Intent.CATEGORY_OPENABLE);
-                saveIntent.setType("application/json");
-                saveIntent.putExtra(Intent.EXTRA_TITLE,"emma-progress.json");
+                String mime=data.optString("mime","application/json");
+                saveIntent.setType("application/x-subrip".equals(mime)?mime:"application/json");
+                saveIntent.putExtra(Intent.EXTRA_TITLE,"application/x-subrip".equals(mime)?"emma-subtitles.srt":"emma-progress.json");
                 try { startActivityForResult(saveIntent,43); }
                 catch (Exception error) { pendingBackup=null; emit("backup","backup-result",json("ok",false)); }
                 break;
