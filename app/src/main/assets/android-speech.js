@@ -5,6 +5,7 @@ let serial=0,voices=[],speakingId=null;const pending=new Map(),instances=new Map
 const id=()=>String(++serial);
 function send(command,data={},requestId=id()){EmmaNative.postMessage(JSON.stringify({command,id:requestId,...data}));return requestId}
 window.emmaNativeEvent=function(message){
+ if(message.type==='backup-result'){window.dispatchEvent(new CustomEvent('emma-backup',{detail:message}));return}
  if(message.type==='permission'){const resolve=pending.get(message.id);if(resolve){pending.delete(message.id);resolve(message.granted)}return}
  if(message.type==='voices'){voices=message.voices||[];events.dispatchEvent(new Event('voiceschanged'));return}
  if(message.type==='voices-changed'){send('voices');return}

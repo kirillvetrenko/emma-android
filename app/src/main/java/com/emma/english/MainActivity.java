@@ -16,6 +16,9 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebChromeClient;
+import android.webkit.ValueCallback;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
 import androidx.webkit.WebViewCompat;
@@ -34,6 +37,8 @@ public class MainActivity extends Activity {
     private String recognitionId;
     private String permissionId;
     private boolean destroyed;
+    private String pendingBackup;
+    private ValueCallback<Uri[]> fileCallback;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -49,7 +54,18 @@ public class MainActivity extends Activity {
         web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setAllowFileAccess(false);
         web.getSettings().setAllowContentAccess(false);
-        web.setWebChromeClient(new WebChromeClient());
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (fileCallback != null) fileCallback.onReceiveValue(null);
+                fileCallback = callback;
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.setType("application/json");
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                try { startActivityForResult(intent, 44); }
+                catch (Exception error) { fileCallback.onReceiveValue(null); fileCallback = null; }
+                return true;
+            }
+        });
         WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
         web.setWebViewClient(new WebViewClientCompat() {
@@ -97,6 +113,18 @@ public class MainActivity extends Activity {
     private void handle(JSONObject data) {
         String id=data.optString("id"), command=data.optString("command");
         switch(command) {
+            case "export-backup":
+                if (pendingBackup != null) break;
+                String backup = data.optString("text");
+                if (backup.length() > 3000000) break;
+                pendingBackup = backup;
+                Intent saveIntent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                saveIntent.addCategory(Intent.CATEGORY_OPENABLE);
+                saveIntent.setType("application/json");
+                saveIntent.putExtra(Intent.EXTRA_TITLE,"emma-progress.json");
+                try { startActivityForResult(saveIntent,43); }
+                catch (Exception error) { pendingBackup=null; emit("backup","backup-result",json("ok",false)); }
+                break;
             case "permission":
                 if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
                     emit(id,"permission",json("granted",true));
@@ -185,7 +213,23 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(code,permissions,grants);
         if(code==42 && permissionId!=null) {emit(permissionId,"permission",json("granted",grants.length>0&&grants[0]==PackageManager.PERMISSION_GRANTED));permissionId=null;}
     }
-    @Override protected void onPause(){super.onPause();web.evaluateJavascript("if(typeof stopVoice==='function')stopVoice()",null);stopRecognition();if(tts!=null)tts.stop();}
-    @Override protected void onDestroy(){destroyed=true;stopRecognition();if(tts!=null)tts.shutdown();web.destroy();super.onDestroy();}
+    @Override protected void onActivityResult(int code, int result, Intent data) {
+        super.onActivityResult(code,result,data);
+        if (code==44 && fileCallback!=null) {
+            fileCallback.onReceiveValue(result==RESULT_OK && data!=null && data.getData()!=null ? new Uri[]{data.getData()} : null);
+            fileCallback=null;
+        }
+        if (code==43 && pendingBackup!=null) {
+            String backup=pendingBackup; pendingBackup=null; boolean ok=false;
+            if (result==RESULT_OK && data!=null && data.getData()!=null) {
+                try (OutputStream stream=getContentResolver().openOutputStream(data.getData())) {
+                    if (stream!=null) { stream.write(backup.getBytes(StandardCharsets.UTF_8)); ok=true; }
+                } catch(Exception ignored) {}
+            }
+            emit("backup","backup-result",json("ok",ok));
+        }
+    }
+    @Override protected void onPause(){super.onPause();if(permissionId==null)web.evaluateJavascript("if(typeof stopVoice==='function')stopVoice()",null);stopRecognition();if(tts!=null)tts.stop();}
+    @Override protected void onDestroy(){destroyed=true;if(fileCallback!=null){fileCallback.onReceiveValue(null);fileCallback=null;}stopRecognition();if(tts!=null)tts.shutdown();web.destroy();super.onDestroy();}
     @Override public void onBackPressed(){if(web.canGoBack())web.goBack();else super.onBackPressed();}
 }
